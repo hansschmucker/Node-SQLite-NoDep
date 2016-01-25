@@ -17,22 +17,26 @@ __Usage__
 Just drop node.exe and sqlite into a directory named BIN (or change the path in SQLite.js).
 
 Create your JS file (for example main.js). Put SQLite.js somewhere and reference it via
+
     const SQLite = require('./SQLite.js');
 
 When opening a database you can specifiy a filename, options for creating tables and a callback to be run after all tables have been created.
+
     var testdb=new SQLite('.\\db\\test.sqlite',[
-	    {name:"FOO",columns:"X int,LABEL varchar[64]"},
-	    {name:"BAR",columns:"X int,LABEL varchar[64]"}
+        {name:"FOO",columns:"X int,LABEL varchar[64]"},
+        {name:"BAR",columns:"X int,LABEL varchar[64]"}
     ],function(){
-      //Your code
+        //Your code
     });
     
 Executing SQL is done via instance.sql, which returns an array of objects where each property corresponds to the column name.
-		testdb.sql("SELECT COUNT(*) AS COUNT FROM FOO",function(data){
-			console.log(JSON.stringify(data,null,"\t"));
-		}.bind(this));
+
+    testdb.sql("SELECT COUNT(*) AS COUNT FROM FOO",function(data){
+        console.log(JSON.stringify(data,null,"\t"));
+    }.bind(this));
 
 Open a shell and start Node
+
     CD \directory
     bin\node.exe main.js
 
