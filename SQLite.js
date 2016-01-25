@@ -43,7 +43,7 @@ SQLite.prototype.close = function(){
 	if(!this.isOpen)
 		return;
 	
-	sqlite3.stdin.write(".exit\r\n");
+	this.process.stdin.write(".exit\r\n");
 }
 
 /*
