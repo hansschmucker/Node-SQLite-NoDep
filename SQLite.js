@@ -22,18 +22,20 @@ SQLite.prototype.open = function(){
 	if(this.isOpen)
 		return;
 	
-	this.process = child_process.execFile('.\\bin\\sqlite3.exe');
+	this.process = child_process.exec('.\\bin\\sqlite3.exe',[],{maxBuffer: 1024*1024*1024});
 	
 	this.process.stdin.write(".open '"+this.dbname+"'\r\n");
-	this.process.stdin.write(".mode list\r\n");
+	this.process.stdin.write(".mode insert\r\n");
 	this.process.stdin.write(".separator '\u0003' '\u0004'\r\n");
 	this.process.stdin.write(".width 0\r\n");
+	this.process.stdin.write(".binary on\r\n");
 	this.process.stdin.write(".headers on\r\n");
 	this.process.stdin.write(".changes on\r\n");
 	
 	this.process.on('close',this.handleClose.bind(this));
 	this.process.stderr.on('data',this.handleStderr.bind(this));
 	this.process.stdout.on('data',this.handleStdout.bind(this));
+	this.process.stdout.on('end',this.handleStdout.bind(this));
 	this.isOpen = true;
 	
 	this.createTables(this.tables,this.onOpenComplete);
@@ -138,13 +140,249 @@ SQLite.prototype._decodeResponse = function(data){
 	return mappedTable;
 };
 
+SQLite.prototype._decodeInsertState = null;
+SQLite.prototype._decodeInsertResponse = function(data,onDone){
+	var parser=/([+\-]?(?:\d*?\.)?\d+(?:E\d+)?)|('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|(X'(?:[A-F\d][A-F\d])*')|(')|(")|(\[)|(NULL)|(CURRENT_TIME)|(CURRENT_DATE)|(CURRENT_TIMESTAMP)|(INSERT INTO)|(changes:\s*\d+\s*total_changes:\s*\d+\s*)|(VALUES)|(,)|(;)|(\()|(\))|(\w+)|(.+?)/gi;
+	data=data.toString();
+	
+	var m=null;
+	if(!this._decodeInsertState){
+		this._decodeInsertState={
+			data:data,
+			table:"",
+			rows:[],
+			currentRow:[],
+			currentRowIdentifiers:[],
+			state:0
+		};
+	}else{
+		this._decodeInsertState.data+=data;
+	}
+	var prevIndex=0;
+	var error=false;
+	while(this._decodeInsertState && !waitForMore && (m=parser.exec(this._decodeInsertState.data)) && !error){
+		
+		var atEnd=parser.lastIndex==this._decodeInsertState.data.length;
+		var waitForMore=false;
+		if(m[13]){
+			//New row
+			if(this._decodeInsertState.state==0){
+				this._decodeInsertState.currentRow=[];
+				this._decodeInsertState.rows.push(this._decodeInsertState.currentRow);
+				this._decodeInsertState.state=1;
+				this._decodeInsertState.table="";
+				this._decodeInsertState.currentRowIdentifiers=[];
+			}else
+				error = this._decodeInsertState.state+" "+1;
+				
+		}else if(m[20] || m[2] || m[3] || m[4]){
+			//Identifier or string
+			var decodedValue=m[4]?m[4].substr(1,m[4].length-2).replace(/\[\[/g,"[") : m[3]?m[3].substr(1,m[3].length-2).replace(/""/g,"\"")  : m[2]?m[2].substr(1,m[2].length-2).replace(/''/g,"'")  : m[20];
+			//If it (except m[15]) matches up to the end of data, save state and wait for resume
+			if(this._decodeInsertState.state==1){
+				//INSERT INTO $TABLE
+				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.table=decodedValue;
+					this._decodeInsertState.state=2;
+				}
+			}else if(this._decodeInsertState.state==3){
+				//INSERT INTO TABLE($COLUMN / INSERT INTO TABLE(COLUMN,$COLUMN
+				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRowIdentifiers.push(decodedValue);
+					this._decodeInsertState.state=4;
+				}
+			}else if(this._decodeInsertState.state==7){
+				//VALUES($STRING / VALUES(DATA,$STRING
+				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRow.push(new Buffer(decodedValue));
+					this._decodeInsertState.state=8;
+				}
+			}else
+				error = 2;
+			
+		}else if(m[1]){
+			//Number
+			//FIXME Better Decode
+			var decodedValue=parseFloat(m[1]);
+			if(this._decodeInsertState.state==7){
+				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRow.push(decodedValue);
+					this._decodeInsertState.state=8;
+				}
+			}else
+				error = 3;
+
+		}else if(m[5]){
+			//Binary
+			var decodedValue=new Buffer(m[5].substr(2,m[5].length-3), 'hex');
+			 if(this._decodeInsertState.state==7){
+				this._decodeInsertState.currentRow.push(decodedValue);
+				this._decodeInsertState.state=8;
+			 }else
+				error = 4;
+
+		}else if(m[9]){
+			//NULL
+			var decodedValue=null;
+			 if(this._decodeInsertState.state==7){
+ 				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRow.push(decodedValue);
+					this._decodeInsertState.state=8;
+				}
+			 }else
+				error = 5;
+
+		}else if(m[10]){
+			//CURRENT_TIME
+			//FIXME decode
+			var decodedValue="CURRENT_TIME";
+			 if(this._decodeInsertState.state==7){
+				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRow.push(decodedValue);
+					this._decodeInsertState.state=8;
+				}
+			 }else
+				error = 6;
+
+		}else if(m[11]){
+			//CURRENT_DATE
+			//FIXME decode
+			var decodedValue="CURRENT_DATE";
+			 if(this._decodeInsertState.state==7){
+ 				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRow.push(decodedValue);
+					this._decodeInsertState.state=8;
+				}
+			 }else
+				error = 7;
+
+		}else if(m[12]){
+			//CURRENT_DATETIME
+			//FIXME decode
+			var decodedValue="CURRENT_DATETIME";
+			 if(this._decodeInsertState.state==7){
+				if(atEnd)
+					waitForMore=true;
+				else{
+					this._decodeInsertState.currentRow.push(decodedValue);
+					this._decodeInsertState.state=8;
+				}
+			 }else
+				error = 8;
+
+		}else if(m[16]){
+			//,
+			if(this._decodeInsertState.state==4)
+				this._decodeInsertState.state=3;
+			else if(this._decodeInsertState.state==8)
+				this._decodeInsertState.state=7;
+			else
+				error = 9;
+
+		}else if(m[17]){
+			//End of statement
+			if(this._decodeInsertState.state==9){
+				this._decodeInsertState.state=0;
+				if(this._decodeInsertState.currentRowIdentifiers.length){
+					var dict={};
+					for(var i=0;i<this._decodeInsertState.currentRowIdentifiers.length;i++){
+						dict[this._decodeInsertState.currentRowIdentifiers[i]]=this._decodeInsertState.currentRow[i];
+					}
+					this._decodeInsertState.rows[this._decodeInsertState.rows.length-1]=dict;
+				}
+				
+			}else
+				error = 10;
+			
+		}else if(m[18]){
+			//(
+			if(this._decodeInsertState.state==2){
+				//We're getting column names
+				this._decodeInsertState.state=3;
+			}else if(this._decodeInsertState.state==6){
+				//Begin values
+				this._decodeInsertState.state=7;
+			}else
+				error = 11;
+
+		}else if(m[19]){
+			//)
+			if(this._decodeInsertState.state==4)
+				//End of columns
+				this._decodeInsertState.state=5;
+			else if(this._decodeInsertState.state==8)
+				//End of values
+				this._decodeInsertState.state=9;
+			else
+				error = this._decodeInsertState.state+" "+12;
+
+		}else if(m[6] || m[7] || m[8]){
+			//Incomplete: Save state and wait for resume
+			waitForMore=true;
+		}else if(m[14]){
+			//Complete: run callback
+			var rows=this._decodeInsertState.rows;
+			this._decodeInsertState=null;
+			onDone(rows);
+		}else if(m[15]){
+			//VALUES
+			if(this._decodeInsertState.state==5 || this._decodeInsertState.state==2)
+				//Begin values
+				if(atEnd)
+					waitForMore=true;
+				else
+					this._decodeInsertState.state=6;
+			else
+				error = 13;
+		}else if(m[21] && m[21].trim().length){
+			//Other
+			error=99;
+		}
+		
+		//FIXME Needs more testing
+		var beforePrevIndex=prevIndex;
+		prevIndex=parser.lastIndex;
+	}
+	
+	if(error){
+		console.error("Parse Error " + error + " '" + m+"'");
+		this._decodeInsertState=null;
+	}else if(waitForMore){
+		//Save state
+		this._decodeInsertState.data=this._decodeInsertState.data.substr(beforePrevIndex);
+	}else if(this._decodeInsertState){
+		this._decodeInsertState.data="";
+	}
+	
+	return;
+};
+
 SQLite.prototype.handleStdout = function(data){
-	if(typeof(this._lastSqlCallback)=="function")
-		this._lastSqlCallback(this._decodeResponse(data));
-	
-	this._lastSqlCallback = null;
-	
-	if(this._sqlQueue.length){
+	if(typeof(this._lastSqlCallback)=="function"){
+		this._decodeInsertResponse(data,function(data){
+			this._lastSqlCallback(data);
+			this._lastSqlCallback = null;
+			if(this._sqlQueue.length){
+				var next=this._sqlQueue[0];
+				this._sqlQueue.splice(0,1);
+				this.sql(next.q,next.c);
+			}
+		}.bind(this));
+	}else if(this._sqlQueue.length){
 		var next=this._sqlQueue[0];
 		this._sqlQueue.splice(0,1);
 		this.sql(next.q,next.c);
