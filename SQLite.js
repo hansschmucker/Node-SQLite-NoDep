@@ -53,7 +53,7 @@ SQLite.prototype.close = function(){
 SQLite.prototype._sqlQueue = null;
 
 SQLite.escapeValue = function(str){
-	return "'"+str.replace("'","''")+"'";
+	return "'"+str.replace(/'/g,"''")+"'";
 }
 
 SQLite.prototype.sql=function(q,callback){
