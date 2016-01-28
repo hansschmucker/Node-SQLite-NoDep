@@ -26,7 +26,6 @@ SQLite.prototype.open = function(){
 	
 	this.process.stdin.write(".open '"+this.dbname+"'\r\n");
 	this.process.stdin.write(".mode insert\r\n");
-	this.process.stdin.write(".separator '\u0003' '\u0004'\r\n");
 	this.process.stdin.write(".width 0\r\n");
 	this.process.stdin.write(".binary on\r\n");
 	this.process.stdin.write(".headers on\r\n");
@@ -69,8 +68,6 @@ SQLite.prototype.sql=function(q,callback){
 		while we're waiting, we'll add this to a private queue, to be run when either an error or output has occured.
 	*/
 	this.open();
-	//0 causes issues for the SQLite shell and 3/4 are our delimeters. We wouldn't want those in our database.
-	q=q.replace(/\u0003|\u0004|\u0000/g," ");
 	
 	if(this._lastSqlCallback){
 		this._sqlQueue.push({q:q,c:callback});
@@ -111,33 +108,6 @@ SQLite.prototype.createTables=function(tablesArray,callback){
 		else
 			callback("OK");
 	}.bind(this)));
-};
-
-
-SQLite.prototype._decodeResponse = function(data){
-	data=data.toString();
-	var rows=data.split("\u0004");
-	if(rows.length<3)
-		return [];
-	
-	var fields=[];
-	var row=rows[0].split("\u0003");
-	for(var i=0;i<row.length;i++)
-		fields.push(row[i]);
-	
-	
-	var mappedTable=[];
-	for(var i=1;i<rows.length-1;i++){
-		if(rows[i].length){
-			var row=rows[i].split("\u0003");
-			var rowTable={};
-			for(var j=0;j<row.length;j++){
-				rowTable[fields[j]]=row[j];
-			}
-			mappedTable.push(rowTable);
-		}
-	}
-	return mappedTable;
 };
 
 SQLite.prototype._decodeInsertState = null;
@@ -222,7 +192,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 
 		}else if(m[5]){
 			//Binary
-			var decodedValue=new Buffer(m[5].substr(2,m[5].length-3), 'hex');
+			var decodedValue=(new Buffer(m[5].substr(2,m[5].length-3), 'hex'));
 			 if(this._decodeInsertState.state==7){
 				this._decodeInsertState.currentRow.push(decodedValue);
 				this._decodeInsertState.state=8;
