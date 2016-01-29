@@ -12,6 +12,7 @@ var SQLite = module.exports = function(dbname,tables,onReady){
 	this.open();
 };
 
+SQLite.debug=0;
 SQLite.prototype.isOpen=false;
 SQLite.prototype.onOpenComplete=null;
 SQLite.prototype.process=null;
@@ -23,19 +24,19 @@ SQLite.prototype.open = function(){
 		return;
 	
 	this.process = child_process.exec('.\\bin\\sqlite3.exe',[],{maxBuffer: 1024*1024*1024});
+	this.isOpen = true;
 	
-	this.process.stdin.write(".open '"+this.dbname+"'\r\n");
-	this.process.stdin.write(".mode insert\r\n");
-	this.process.stdin.write(".width 0\r\n");
-	this.process.stdin.write(".binary on\r\n");
-	this.process.stdin.write(".headers on\r\n");
-	this.process.stdin.write(".changes on\r\n");
+	this._rawCmd(".open '"+this.dbname);
+	this._rawCmd(".mode insert");
+	this._rawCmd(".width 0");
+	this._rawCmd(".binary on");
+	this._rawCmd(".headers on");
+	this._rawCmd(".changes on");
 	
 	this.process.on('close',this.handleClose.bind(this));
 	this.process.stderr.on('data',this.handleStderr.bind(this));
 	this.process.stdout.on('data',this.handleStdout.bind(this));
 	this.process.stdout.on('end',this.handleStdout.bind(this));
-	this.isOpen = true;
 	
 	this.createTables(this.tables,this.onOpenComplete);
 }
@@ -44,7 +45,7 @@ SQLite.prototype.close = function(){
 	if(!this.isOpen)
 		return;
 	
-	this.process.stdin.write(".exit\r\n");
+	this._rawCmd(".exit");
 }
 
 /*
@@ -57,7 +58,47 @@ SQLite.escapeValue = function(str){
 	return "'"+str.replace(/'/g,"''")+"'";
 }
 
-SQLite.prototype.sql=function(q,callback){
+SQLite.prototype.resolveBind = function(q,params){
+	if(!params)
+		return q;
+
+		//FIXME implement bind parameters: ?IDENTIFIERNAME #NUMNAME $STRNAME &BINNAME
+		//Make sure that we only match OUTSIDE strings. 
+		//Find the following tokens ('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\]) and return them right back
+		// Match the following tokens and replace them with data: (\?\w+)|(\#\w+)|(\$\w+)|(\&\w+)
+		var parser=/('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|\?(\w+)|\#(\w+)|\$(\w+)|\&(\w+)/gi;
+		q=q.replace(parser,function(match, singleQuote, doubleQuote, squareQuote, identParam,numParam,strParam,binParam){
+				if(singleQuote || doubleQuote || squareQuote)
+					return (singleQuote || doubleQuote || squareQuote);
+				else if(identParam){
+					if(typeof(params[identParam])!="string")
+						throw("Bind parameter not string.");
+					
+					return '"'+params[identParam].replace(/"/g,'""')+'"';
+				}else if(numParam){
+					if(typeof(params[numParam])!="number")
+						throw("Bind parameter not number.");
+					
+					return params[numParam].toString();
+				}else if(strParam){
+					if(typeof(params[strParam])!="string" && !(params[strParam] instanceof Buffer))
+						throw("Bind parameter not string or Buffer.");
+					
+					return "'"+params[strParam].toString().replace(/'/g,"''")+"'";
+				}else if(binParam){
+					if(typeof(params[binParam])!="string" && !(params[binParam] instanceof Buffer))
+						throw("Bind parameter not string or Buffer.");
+					
+					if(params[binParam] instanceof Buffer)
+						return "X'"+params[binParam].toString('hex').toUpperCase()+"'";
+					else
+						return "X'"+(new Buffer(params[binParam])).toString('hex').toUpperCase()+"'";
+				}
+		});
+		
+		return q;
+};
+SQLite.prototype.sql=function(q,callbackOrParametersObject,callbackIfParameters){
 	/*
 		Possible scenarios:
 			No output ever: SQLITE is still waiting for the end of the statement
@@ -68,16 +109,29 @@ SQLite.prototype.sql=function(q,callback){
 		while we're waiting, we'll add this to a private queue, to be run when either an error or output has occured.
 	*/
 	this.open();
-	
-	if(this._lastSqlCallback){
-		this._sqlQueue.push({q:q,c:callback});
-	}else{
-		this._lastSqlCallback = callback||true;
-		this._rawCmd(q+";");
+	if(typeof(callbackOrParametersObject)=="function"){
+		
+		if(this._lastSqlCallback){
+			this._sqlQueue.push({q:q,c:callbackOrParametersObject});
+		}else{
+			this._lastSqlCallback = callbackOrParametersObject||true;
+			this._rawCmd(q+";");
+		}
+	}else if(typeof(callbackOrParametersObject)=="object"){
+		q=this.resolveBind(q,callbackOrParametersObject);
+		
+		if(this._lastSqlCallback){
+			this._sqlQueue.push({q:q,c:callbackIfParameters});
+		}else{
+			this._lastSqlCallback = callbackIfParameters||true;
+			this._rawCmd(q+";");
+		}		
 	}
 }
 
 SQLite.prototype._rawCmd=function(q,callback){
+	if(SQLite.debug>=3)
+		console.log("STDIN: "+q);
 	/*
 		This is ONLY for specific commands that are not SQL, like ".tables"
 	*/
@@ -89,7 +143,7 @@ SQLite.prototype._rawCmd=function(q,callback){
 SQLite.prototype.createTable=function(name,columns,callback){
 	this.open();
 	
-	this.sql("CREATE TABLE "+name+"("+columns+")",callback);
+	this.sql("CREATE TABLE ?name("+columns+")",{name:name},callback);
 };
 
 SQLite.prototype.createTables=function(tablesArray,callback){
@@ -307,6 +361,9 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 			//Complete: run callback
 			var rows=this._decodeInsertState.rows;
 			this._decodeInsertState=null;
+			if(this.debug>=3){
+				console.log(rows);
+			}
 			onDone(rows);
 		}else if(m[15]){
 			//VALUES
@@ -329,7 +386,8 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 	}
 	
 	if(error){
-		console.error("Parse Error " + error + " '" + m+"'");
+		if(SQLite.debug>=1)
+			console.error("Parse Error " + error + " '" + m+"'");
 		this._decodeInsertState=null;
 	}else if(waitForMore){
 		//Save state
@@ -342,6 +400,8 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 };
 
 SQLite.prototype.handleStdout = function(data){
+	if(SQLite.debug>=3)
+		console.log("STDOUT: "+data);
 	if(typeof(this._lastSqlCallback)=="function"){
 		this._decodeInsertResponse(data,function(data){
 			this._lastSqlCallback(data);
@@ -360,7 +420,8 @@ SQLite.prototype.handleStdout = function(data){
 };
 
 SQLite.prototype.handleStderr = function(data){
-	console.error("STDERR:"+data);
+	if(SQLite.debug>=2)
+		console.error("STDERR:"+data);
 	if(typeof(this._lastSqlCallback)=="function")
 		this._lastSqlCallback("Database error.");
 	

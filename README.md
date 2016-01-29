@@ -35,6 +35,17 @@ Executing SQL is done via instance.sql, which returns an array of objects where 
     testdb.sql("SELECT COUNT(*) AS COUNT FROM FOO",function(data){
         console.log(JSON.stringify(data,null,"\t"));
     }.bind(this));
+    
+If you need bind parameters, those are available too, although they use a different scheme than what SQLite usually uses, specifically ?IDENTIFIER, $STRING, #NUMBER and &BINARY:
+For example:
+
+    this.db.sql("DELETE FROM ?userTableName WHERE ?userColumn=&username",
+        {
+            userTableName:this.userTableName,
+            userColumn:this.userColumn,
+            username:username
+        },
+    onDone);
 
 Open a shell and start Node
 
