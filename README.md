@@ -1,17 +1,17 @@
-# Node-SQLite
+# Node-SQLite-NoDep
 
-__Node-SQLite__
+__Node-SQLite-NoDep__
 
-Node-SQLite is a very simplistic abstraction layer for the sqlite3 shell application. While full integration using something like
-node-sqlite3 is usually preferable, there are cases when a simple, portable solution is a safer choice. Node-SQLite requires nothing
+Node-SQLite-NoDep is a very simplistic abstraction layer for the sqlite3 shell application. While full integration using something like
+Node-SQLite3 is usually preferable, there are cases when a simple, portable solution is a safer choice. Node-SQLite-NoDep requires nothing
 but the plain node.exe and sqlite3.exe files. No NPM, nothing. Just these two EXE files.
 
 __Limitations__
 
 - Error reporting is a bit broken. SQL errors are therefore reported directly to console.error.
-- ~~Handling of character \u0000 is broken in sqlite3.exe, so Node-SQLite replaces it with \u0020 automatically.~~ (Node-SQLite now uses sqlite3.exe INSERT-formatted output)
-- ~~Characters \u0003 and \u0004 are used as delimiters~~ (Node-SQLite now uses sqlite3.exe INSERT-formatted output)
-- ~~This applies to binary data as well.~~ (Node-SQLite now uses sqlite3.exe INSERT-formatted output)
+- ~~Handling of character \u0000 is broken in sqlite3.exe, so Node-SQLite-NoDep replaces it with \u0020 automatically.~~ (Node-SQLite-NoDep now uses sqlite3.exe INSERT-formatted output)
+- ~~Characters \u0003 and \u0004 are used as delimiters~~ (Node-SQLite-NoDep now uses sqlite3.exe INSERT-formatted output)
+- ~~This applies to binary data as well.~~ (Node-SQLite-NoDep now uses sqlite3.exe INSERT-formatted output)
 
 __Usage__
 
