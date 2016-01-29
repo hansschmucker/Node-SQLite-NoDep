@@ -12,7 +12,7 @@ var SQLite = module.exports = function(dbname,tables,onReady){
 	this.open();
 };
 
-SQLite.debug=0;
+SQLite.prototype.debug=0;
 SQLite.prototype.isOpen=false;
 SQLite.prototype.onOpenComplete=null;
 SQLite.prototype.process=null;
@@ -130,7 +130,7 @@ SQLite.prototype.sql=function(q,callbackOrParametersObject,callbackIfParameters)
 }
 
 SQLite.prototype._rawCmd=function(q,callback){
-	if(SQLite.debug>=3)
+	if(this.debug>=3)
 		console.log("STDIN: "+q);
 	/*
 		This is ONLY for specific commands that are not SQL, like ".tables"
@@ -386,7 +386,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 	}
 	
 	if(error){
-		if(SQLite.debug>=1)
+		if(this.debug>=1)
 			console.error("Parse Error " + error + " '" + m+"'");
 		this._decodeInsertState=null;
 	}else if(waitForMore){
@@ -400,7 +400,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 };
 
 SQLite.prototype.handleStdout = function(data){
-	if(SQLite.debug>=3)
+	if(this.debug>=3)
 		console.log("STDOUT: "+data);
 	if(typeof(this._lastSqlCallback)=="function"){
 		this._decodeInsertResponse(data,function(data){
@@ -420,7 +420,7 @@ SQLite.prototype.handleStdout = function(data){
 };
 
 SQLite.prototype.handleStderr = function(data){
-	if(SQLite.debug>=2)
+	if(this.debug>=2)
 		console.error("STDERR:"+data);
 	if(typeof(this._lastSqlCallback)=="function")
 		this._lastSqlCallback("Database error.");
