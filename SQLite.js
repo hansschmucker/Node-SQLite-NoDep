@@ -12,7 +12,7 @@ var SQLite = module.exports = function(dbname,tables,onReady){
 	this.open();
 };
 
-SQLite.prototype.debug=0;
+SQLite.prototype.debug=3;
 SQLite.prototype.isOpen=false;
 SQLite.prototype.onOpenComplete=null;
 SQLite.prototype.process=null;
@@ -66,28 +66,30 @@ SQLite.prototype.resolveBind = function(q,params){
 		//Make sure that we only match OUTSIDE strings. 
 		//Find the following tokens ('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\]) and return them right back
 		// Match the following tokens and replace them with data: (\?\w+)|(\#\w+)|(\$\w+)|(\&\w+)
-		var parser=/('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|\?(\w+)|\#(\w+)|\$(\w+)|\&(\w+)/gi;
+		var parser=/('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|\?([a-z_][0-9a-z_]*)|\#([a-z_][0-9a-z_]*)|\$([a-z_][0-9a-z_]*)|\&([a-z_][0-9a-z_]*)/gi;
+		if(this.debug>=3)
+			console.log(q);
 		q=q.replace(parser,function(match, singleQuote, doubleQuote, squareQuote, identParam,numParam,strParam,binParam){
 				if(singleQuote || doubleQuote || squareQuote)
 					return (singleQuote || doubleQuote || squareQuote);
 				else if(identParam){
 					if(typeof(params[identParam])!="string")
-						throw("Bind parameter not string.");
+						throw("Bind identifier "+identParam+" parameter not string.");
 					
 					return '"'+params[identParam].replace(/"/g,'""')+'"';
 				}else if(numParam){
 					if(typeof(params[numParam])!="number")
-						throw("Bind parameter not number.");
+						throw("Bind parameter "+numParam+" not number.");
 					
 					return params[numParam].toString();
 				}else if(strParam){
 					if(typeof(params[strParam])!="string" && !(params[strParam] instanceof Buffer))
-						throw("Bind parameter not string or Buffer.");
+						throw("Bind parameter "+strParam+" not string or Buffer.");
 					
 					return "'"+params[strParam].toString().replace(/'/g,"''")+"'";
 				}else if(binParam){
 					if(typeof(params[binParam])!="string" && !(params[binParam] instanceof Buffer))
-						throw("Bind parameter not string or Buffer.");
+						throw("Bind parameter "+binParam+" not string or Buffer.");
 					
 					if(params[binParam] instanceof Buffer)
 						return "X'"+params[binParam].toString('hex').toUpperCase()+"'";
