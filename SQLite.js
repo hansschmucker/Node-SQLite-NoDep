@@ -1,5 +1,7 @@
 const child_process = require('child_process');
 
+//Necessary since WebStorm barks on jsdoc object array parameter declaration
+//noinspection JSCommentMatchesSignature
 /**
  * Creates and manages an sqlite3 instance.
  *
@@ -89,7 +91,7 @@ SQLite.prototype._open_child_process = function(){
 	this._child_process.stdout.on('end',this._handleStdout.bind(this));
 	
 	this.createTables(this.tables,this.onOpenComplete);
-}
+};
 
 /**
  * Closes the SQLite3 process gracefully. The object can however be reused.
@@ -99,7 +101,7 @@ SQLite.prototype.close = function(){
 		return;
 	
 	this._rawCmd(".exit");
-}
+};
 
 /**
  * An array containing the queued queries and their callbacks.
@@ -123,7 +125,7 @@ SQLite.prototype.resolveBind = function(q,params){
 		//Make sure that we only match OUTSIDE strings.
 		//Find the following tokens ('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\]) and return them right back
 		// Match the following tokens and replace them with data: (\?\w+)|(\#\w+)|(\$\w+)|(\&\w+)
-		var parser=/('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|\?([a-z_][0-9a-z_]*)|\#([a-z_][0-9a-z_]*)|\$([a-z_][0-9a-z_]*)|\&([a-z_][0-9a-z_]*)/gi;
+		var parser=/('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:]])*|[\s\S]*?[^\]](?:]])*)])|\?([a-z_][0-9a-z_]*)|#([a-z_][0-9a-z_]*)|\$([a-z_][0-9a-z_]*)|&([a-z_][0-9a-z_]*)/gi;
 		if(this.debug>=3)
 			console.log(q);
 		q=q.replace(parser,function(match, singleQuote, doubleQuote, squareQuote, identParam,numParam,strParam,binParam){
@@ -184,7 +186,7 @@ SQLite.prototype.sql=function(q,callbackOrParametersObject,callbackIfParameters)
 			this._rawCmd(q+";");
 		}		
 	}
-}
+};
 
 /**
  * Passes any code directly to the sqlite3.exe instance.
@@ -200,7 +202,7 @@ SQLite.prototype._rawCmd=function(q){
 	this._open_child_process();
 	
 	this._child_process.stdin.write(q+"\r\n");
-}
+};
 
 /**
  * Creates a table
@@ -214,6 +216,8 @@ SQLite.prototype.createTable=function(name,columns,callback){
 	this.sql("CREATE TABLE ?name("+columns+")",{name:name},callback);
 };
 
+//Necessary since WebStorm barks on jsdoc object array parameter declaration
+//noinspection JSCommentMatchesSignature
 /**
  * Creates any number of tables and runs the specified callback upon completion.
  * @param {Object[]} tablesArray An array containing the name and SQL create string describing each column
@@ -230,7 +234,7 @@ SQLite.prototype.createTables=function(tablesArray,callback){
 	}
 	
 	var createNextTable;
-	this.createTable(tablesArray[0].name,tablesArray[0].columns,createNextTable=(function(data){
+	this.createTable(tablesArray[0].name,tablesArray[0].columns,createNextTable=(function(){
 		i++;
 		if(i<tablesArray.length)
 			this.createTable(tablesArray[i].name,tablesArray[i].columns,createNextTable);
@@ -247,15 +251,15 @@ SQLite.prototype.createTables=function(tablesArray,callback){
 SQLite.prototype._decodeInsertState = null;
 /**
  * Decodes INSERT statements until changes:\s*\d+\s*total_changes:\s*\d+\s* is encountered. Input may be incomplete, in which case onDone will not be called.
- * @param {string} data Input string
+ * @param {string|Buffer} data Input string
  * @param {function} onDone Function to be called after all data has been received.
  * @private
  */
 SQLite.prototype._decodeInsertResponse = function(data,onDone){
-	var parser=/([+\-]?(?:\d*?\.)?\d+(?:E\d+)?)|('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|(X'(?:[A-F\d][A-F\d])*')|(')|(")|(\[)|(NULL)|(CURRENT_TIME)|(CURRENT_DATE)|(CURRENT_TIMESTAMP)|(INSERT INTO)|(changes:\s*\d+\s*total_changes:\s*\d+\s*)|(VALUES)|(,)|(;)|(\()|(\))|(\w+)|(.+?)/gi;
+	var parser=/([+\-]?(?:\d*?\.)?\d+(?:E\d+)?)|('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:]])*|[\s\S]*?[^\]](?:]])*)])|(X'(?:[A-F\d][A-F\d])*')|(')|(")|(\[)|(NULL)|(CURRENT_TIME)|(CURRENT_DATE)|(CURRENT_TIMESTAMP)|(INSERT INTO)|(changes:\s*\d+\s*total_changes:\s*\d+\s*)|(VALUES)|(,)|(;)|(\()|(\))|(\w+)|(.+?)/gi;
 	data=data.toString();
 	
-	var m=null;
+	var m;
 	if(!this._decodeInsertState){
 		this._decodeInsertState={
 			data:data,
@@ -274,6 +278,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 		
 		var atEnd=parser.lastIndex==this._decodeInsertState.data.length;
 		var waitForMore=false;
+		var decodedValue;
 		if(m[13]){
 			//New row
 			if(this._decodeInsertState.state==0){
@@ -287,7 +292,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 				
 		}else if(m[20] || m[2] || m[3] || m[4]){
 			//Identifier or string
-			var decodedValue=m[4]?m[4].substr(1,m[4].length-2).replace(/\[\[/g,"[") : m[3]?m[3].substr(1,m[3].length-2).replace(/""/g,"\"")  : m[2]?m[2].substr(1,m[2].length-2).replace(/''/g,"'")  : m[20];
+			decodedValue=m[4]?m[4].substr(1,m[4].length-2).replace(/\[\[/g,"[") : m[3]?m[3].substr(1,m[3].length-2).replace(/""/g,"\"")  : m[2]?m[2].substr(1,m[2].length-2).replace(/''/g,"'")  : m[20];
 			//If it (except m[15]) matches up to the end of data, save state and wait for resume
 			if(this._decodeInsertState.state==1){
 				//INSERT INTO $TABLE
@@ -318,8 +323,8 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 			
 		}else if(m[1]){
 			//Number
-			//FIXME Better Decode
-			var decodedValue=parseFloat(m[1]);
+			//Might need Better Decode
+			decodedValue=parseFloat(m[1]);
 			if(this._decodeInsertState.state==7){
 				if(atEnd)
 					waitForMore=true;
@@ -332,7 +337,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 
 		}else if(m[5]){
 			//Binary
-			var decodedValue=(new Buffer(m[5].substr(2,m[5].length-3), 'hex'));
+			decodedValue=(new Buffer(m[5].substr(2,m[5].length-3), 'hex'));
 			 if(this._decodeInsertState.state==7){
 				this._decodeInsertState.currentRow.push(decodedValue);
 				this._decodeInsertState.state=8;
@@ -341,7 +346,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 
 		}else if(m[9]){
 			//NULL
-			var decodedValue=null;
+			decodedValue=null;
 			 if(this._decodeInsertState.state==7){
  				if(atEnd)
 					waitForMore=true;
@@ -354,8 +359,8 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 
 		}else if(m[10]){
 			//CURRENT_TIME
-			//FIXME decode
-			var decodedValue="CURRENT_TIME";
+			//Not implemented
+			decodedValue="CURRENT_TIME";
 			 if(this._decodeInsertState.state==7){
 				if(atEnd)
 					waitForMore=true;
@@ -368,8 +373,8 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 
 		}else if(m[11]){
 			//CURRENT_DATE
-			//FIXME decode
-			var decodedValue="CURRENT_DATE";
+			//Not implemented
+			decodedValue="CURRENT_DATE";
 			 if(this._decodeInsertState.state==7){
  				if(atEnd)
 					waitForMore=true;
@@ -382,8 +387,8 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 
 		}else if(m[12]){
 			//CURRENT_DATETIME
-			//FIXME decode
-			var decodedValue="CURRENT_DATETIME";
+			//Not implemented
+			decodedValue="CURRENT_DATETIME";
 			 if(this._decodeInsertState.state==7){
 				if(atEnd)
 					waitForMore=true;
@@ -466,7 +471,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 			error=99;
 		}
 		
-		//FIXME Needs more testing
+		//Doesn't feel quite right.
 		var beforePrevIndex=prevIndex;
 		prevIndex=parser.lastIndex;
 	}
@@ -481,8 +486,7 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 	}else if(this._decodeInsertState){
 		this._decodeInsertState.data="";
 	}
-	
-	return;
+
 };
 
 /**
@@ -532,9 +536,8 @@ SQLite.prototype._handleStderr = function(data){
 
 /**
  * Tracks whether sqlite3.exe is currently running.
- * @param code
  * @private
  */
-SQLite.prototype._handleClose = function(code){
+SQLite.prototype._handleClose = function(){
 	this._isOpen=false;
 };
