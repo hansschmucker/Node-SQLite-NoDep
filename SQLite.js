@@ -1,69 +1,126 @@
 const child_process = require('child_process');
 
-
-/*
-	"test.sqlite",[{name:"FOO",columns:"X INT, TEXT VARCHAR[64]"},...]
-*/
-var SQLite = module.exports = function(dbname,tables,onReady){
+/**
+ * Creates and manages an sqlite3 instance.
+ *
+ * @constructor
+ * @type {SQLite}
+ *
+ * @param {string} databaseFilename The file name of the SQLITE database file to be used.
+ * @param {Object[]} tableCreateArray An array containing the name and SQL create string describing each column
+ * @param {string} tableCreateArray[].name Name of the column
+ * @param {string} tableCreateArray[].columns SQL describing the content of the row
+ * @param {function} onReady Called after the tables have been created.
+ */
+var SQLite = function(databaseFilename,tableCreateArray,onReady){
 	this._sqlQueue = [];
-	this.dbname=dbname;
-	this.tables=tables;
+	this._db_filename=databaseFilename;
+	this.tables=tableCreateArray;
 	this.onOpenComplete = onReady;
-	this.open();
+	this._open_child_process();
 };
 
-SQLite.prototype.debug=3;
-SQLite.prototype.isOpen=false;
+module.exports=SQLite;
+
+/**
+ * Specifies how much will be output to the console. 0 means no output, 3 means verbose output.
+ * @type {number}
+ */
+SQLite.prototype.debug=0;
+/**
+ * Determines whether open is needed before the instance can be used again.
+ * @type {boolean}
+ * @private
+ */
+SQLite.prototype._isOpen=false;
+/**
+ * Called after tables have been created.
+ * @type {function}
+ */
 SQLite.prototype.onOpenComplete=null;
-SQLite.prototype.process=null;
-SQLite.prototype.dbname="";
-SQLite.prototype.tables="";
+/**
+ * sqlite3 child process.
+ * @type {child_process}
+ * @private
+ */
+SQLite.prototype._child_process=null;
+/**
+ * Name of the SQLite database file.
+ * @type {string}
+ * @private
+ */
+SQLite.prototype._db_filename="";
+/**
+ * An array containing the name and SQL create string describing each column
+ * @type {Object[]} tables
+ * @type {string} tables[].name
+ * @type {string} tables[].columns
+ */
+SQLite.prototype.tables=null;
+/**
+ * The callback that will be run once the current statement finishes.
+ * @type {function}
+ * @private
+ */
 SQLite.prototype._lastSqlCallback = null;
-SQLite.prototype.open = function(){
-	if(this.isOpen)
+
+/**
+ * Opens an sqlite3.exe child_process and sets it up.
+ * @type {function}
+ * @private
+ */
+SQLite.prototype._open_child_process = function(){
+	if(this._isOpen)
 		return;
 	
-	this.process = child_process.exec('.\\bin\\sqlite3.exe',[],{maxBuffer: 1024*1024*1024});
-	this.isOpen = true;
+	this._child_process = child_process.exec('.\\bin\\sqlite3.exe',[],{maxBuffer: 1024*1024*1024});
+	this._isOpen = true;
 	
-	this._rawCmd(".open '"+this.dbname);
+	this._rawCmd(".open '"+this._db_filename+"'");
 	this._rawCmd(".mode insert");
 	this._rawCmd(".width 0");
 	this._rawCmd(".binary on");
 	this._rawCmd(".headers on");
 	this._rawCmd(".changes on");
 	
-	this.process.on('close',this.handleClose.bind(this));
-	this.process.stderr.on('data',this.handleStderr.bind(this));
-	this.process.stdout.on('data',this.handleStdout.bind(this));
-	this.process.stdout.on('end',this.handleStdout.bind(this));
+	this._child_process.on('close',this._handleClose.bind(this));
+	this._child_process.stderr.on('data',this._handleStderr.bind(this));
+	this._child_process.stdout.on('data',this._handleStdout.bind(this));
+	this._child_process.stdout.on('end',this._handleStdout.bind(this));
 	
 	this.createTables(this.tables,this.onOpenComplete);
 }
 
+/**
+ * Closes the SQLite3 process gracefully. The object can however be reused.
+ */
 SQLite.prototype.close = function(){
-	if(!this.isOpen)
+	if(!this._isOpen)
 		return;
 	
 	this._rawCmd(".exit");
 }
 
-/*
-	Contains any statements run while we're still waiting for a result. This way we can make sure that we receive one result per request.
-	[{q:string,c:function}]
-*/
+/**
+ * An array containing the queued queries and their callbacks.
+ * @type {Object[]} _sqlQueue
+ * @type {string} _sqlQueue[].q
+ * @type {function} _sqlQueue[].c
+ * @private
+ */
 SQLite.prototype._sqlQueue = null;
 
-SQLite.escapeValue = function(str){
-	return "'"+str.replace(/'/g,"''")+"'";
-}
-
+/**
+ * Injects values into a query string: ?id for identifier $id for string, #id for number, &id for binary.
+ * @param {string} q
+ * @param {object} params
+ * @returns {string}
+ */
 SQLite.prototype.resolveBind = function(q,params){
 	if(!params)
 		return q;
 
-		//FIXME implement bind parameters: ?IDENTIFIERNAME #NUMNAME $STRNAME &BINNAME
-		//Make sure that we only match OUTSIDE strings. 
+		//Make sure that we only match OUTSIDE strings.
 		//Find the following tokens ('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\]) and return them right back
 		// Match the following tokens and replace them with data: (\?\w+)|(\#\w+)|(\$\w+)|(\&\w+)
 		var parser=/('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|\?([a-z_][0-9a-z_]*)|\#([a-z_][0-9a-z_]*)|\$([a-z_][0-9a-z_]*)|\&([a-z_][0-9a-z_]*)/gi;
@@ -100,17 +157,15 @@ SQLite.prototype.resolveBind = function(q,params){
 		
 		return q;
 };
+
+/**
+ * Runs the specified query and calls a callback when it completes. An optional object may be used to resolve bind parameters.
+ * @param {string} q Query
+ * @param {object|function} callbackOrParametersObject Either the callback or if the query string contains bind parameters, an object used to look up values
+ * @param {function} [callbackIfParameters] Callback if bind paramters are used.
+ */
 SQLite.prototype.sql=function(q,callbackOrParametersObject,callbackIfParameters){
-	/*
-		Possible scenarios:
-			No output ever: SQLITE is still waiting for the end of the statement
-			STDERR output: Something has gone wrong
-			STDOUT ouput: Result, including ECHO and CHANGES
-	
-		By automatically adding ";" we make sure that case 1 never happens. So we wait for #2 or #3 to happen. If another SQL call occurs
-		while we're waiting, we'll add this to a private queue, to be run when either an error or output has occured.
-	*/
-	this.open();
+	this._open_child_process();
 	if(typeof(callbackOrParametersObject)=="function"){
 		
 		if(this._lastSqlCallback){
@@ -131,23 +186,41 @@ SQLite.prototype.sql=function(q,callbackOrParametersObject,callbackIfParameters)
 	}
 }
 
-SQLite.prototype._rawCmd=function(q,callback){
+/**
+ * Passes any code directly to the sqlite3.exe instance.
+ * @param {string} q The command to be run
+ * @private
+ */
+SQLite.prototype._rawCmd=function(q){
 	if(this.debug>=3)
 		console.log("STDIN: "+q);
 	/*
 		This is ONLY for specific commands that are not SQL, like ".tables"
 	*/
-	this.open();
+	this._open_child_process();
 	
-	this.process.stdin.write(q+"\r\n");
+	this._child_process.stdin.write(q+"\r\n");
 }
 
+/**
+ * Creates a table
+ * @param {string} name The name of the table
+ * @param {string}columns A string containing the SQL Syntax for all columns
+ * @param {function} callback Callback to be run upon completion.
+ */
 SQLite.prototype.createTable=function(name,columns,callback){
-	this.open();
+	this._open_child_process();
 	
 	this.sql("CREATE TABLE ?name("+columns+")",{name:name},callback);
 };
 
+/**
+ * Creates any number of tables and runs the specified callback upon completion.
+ * @param {Object[]} tablesArray An array containing the name and SQL create string describing each column
+ * @param {string} tablesArray[].name Name of the column
+ * @param {string} tablesArray[].columns SQL describing the content of the row
+ * @param {function} callback
+ */
 SQLite.prototype.createTables=function(tablesArray,callback){
 	var i=0;
 	
@@ -166,7 +239,18 @@ SQLite.prototype.createTables=function(tablesArray,callback){
 	}.bind(this)));
 };
 
+/**
+ * Used to resume parsing of INSERT statement if input is incomplete.
+ * @type {object}
+ * @private
+ */
 SQLite.prototype._decodeInsertState = null;
+/**
+ * Decodes INSERT statements until changes:\s*\d+\s*total_changes:\s*\d+\s* is encountered. Input may be incomplete, in which case onDone will not be called.
+ * @param {string} data Input string
+ * @param {function} onDone Function to be called after all data has been received.
+ * @private
+ */
 SQLite.prototype._decodeInsertResponse = function(data,onDone){
 	var parser=/([+\-]?(?:\d*?\.)?\d+(?:E\d+)?)|('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\])|(X'(?:[A-F\d][A-F\d])*')|(')|(")|(\[)|(NULL)|(CURRENT_TIME)|(CURRENT_DATE)|(CURRENT_TIMESTAMP)|(INSERT INTO)|(changes:\s*\d+\s*total_changes:\s*\d+\s*)|(VALUES)|(,)|(;)|(\()|(\))|(\w+)|(.+?)/gi;
 	data=data.toString();
@@ -401,7 +485,12 @@ SQLite.prototype._decodeInsertResponse = function(data,onDone){
 	return;
 };
 
-SQLite.prototype.handleStdout = function(data){
+/**
+ * Handles the STDOUT stream coming from sqlite3.exe
+ * @param {Buffer} data
+ * @private
+ */
+SQLite.prototype._handleStdout = function(data){
 	if(this.debug>=3)
 		console.log("STDOUT: "+data);
 	if(typeof(this._lastSqlCallback)=="function"){
@@ -421,7 +510,12 @@ SQLite.prototype.handleStdout = function(data){
 	}
 };
 
-SQLite.prototype.handleStderr = function(data){
+/**
+ * Handles the STDERR stream coming from sqlite3.exe
+ * @param {Buffer} data
+ * @private
+ */
+SQLite.prototype._handleStderr = function(data){
 	if(this.debug>=2)
 		console.error("STDERR:"+data);
 	if(typeof(this._lastSqlCallback)=="function")
@@ -436,6 +530,11 @@ SQLite.prototype.handleStderr = function(data){
 	}
 };
 
-SQLite.prototype.handleClose = function(code){
-	this.isOpen=false;
+/**
+ * Tracks whether sqlite3.exe is currently running.
+ * @param code
+ * @private
+ */
+SQLite.prototype._handleClose = function(code){
+	this._isOpen=false;
 };
