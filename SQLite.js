@@ -75,7 +75,7 @@ SQLite.prototype._open_child_process = function(){
 	if(this._isOpen)
 		return;
 	
-	this._child_process = child_process.exec('.\\bin\\sqlite3.exe',[],{maxBuffer: 1024*1024*1024});
+	this._child_process = child_process.spawn('.\\bin\\sqlite3.exe',[],{maxBuffer: 1024*1024*1024*32});
 	this._isOpen = true;
 	
 	this._rawCmd(".open '"+this._db_filename+"'");
@@ -84,7 +84,8 @@ SQLite.prototype._open_child_process = function(){
 	this._rawCmd(".binary on");
 	this._rawCmd(".headers on");
 	this._rawCmd(".changes on");
-	
+	this._rawCmd("PRAGMA foreign_keys = ON;");
+
 	this._child_process.on('close',this._handleClose.bind(this));
 	this._child_process.stderr.on('data',this._handleStderr.bind(this));
 	this._child_process.stdout.on('data',this._handleStdout.bind(this));
@@ -121,6 +122,7 @@ SQLite.prototype._sqlQueue = null;
 SQLite.prototype.resolveBind = function(q,params){
 	if(!params)
 		return q;
+		var src=q;
 
 		//Make sure that we only match OUTSIDE strings.
 		//Find the following tokens ('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:\]\])*|[\s\S]*?[^\]](?:\]\])*)\]) and return them right back
@@ -133,22 +135,22 @@ SQLite.prototype.resolveBind = function(q,params){
 					return (singleQuote || doubleQuote || squareQuote);
 				else if(identParam){
 					if(typeof(params[identParam])!="string")
-						throw("Bind identifier "+identParam+" parameter not string.");
+						throw("IDN Bind identifier "+identParam+" parameter not string. "+q+" "+JSON.stringify(params));
 					
 					return '"'+params[identParam].replace(/"/g,'""')+'"';
 				}else if(numParam){
 					if(typeof(params[numParam])!="number")
-						throw("Bind parameter "+numParam+" not number.");
+						throw("NUM Bind parameter "+numParam+" not number. "+q+" "+JSON.stringify(params));
 					
 					return params[numParam].toString();
 				}else if(strParam){
 					if(typeof(params[strParam])!="string" && !(params[strParam] instanceof Buffer))
-						throw("Bind parameter "+strParam+" not string or Buffer.");
+						throw("STR Bind parameter "+strParam+" not string or Buffer. "+q+" "+JSON.stringify(params));
 					
 					return "'"+params[strParam].toString().replace(/'/g,"''")+"'";
 				}else if(binParam){
 					if(typeof(params[binParam])!="string" && !(params[binParam] instanceof Buffer))
-						throw("Bind parameter "+binParam+" not string or Buffer.");
+						throw("BIN Bind parameter "+binParam+" not string or Buffer. "+q+" "+JSON.stringify(params));
 					
 					if(params[binParam] instanceof Buffer)
 						return "X'"+params[binParam].toString('hex').toUpperCase()+"'";
@@ -256,6 +258,7 @@ SQLite.prototype._decodeInsertState = null;
  * @private
  */
 SQLite.prototype._decodeInsertResponse = function(data,onDone){
+	//FIXME add lookahead to make sure words do not match if followed by another letter.
 	var parser=/([+\-]?(?:\d*?\.)?\d+(?:E\d+)?)|('(?:(?:'')*|[\s\S]*?[^'](?:'')*)')|("(?:(?:"")*|[\s\S]*?[^"](?:"")*)")|(\[(?:(?:]])*|[\s\S]*?[^\]](?:]])*)])|(X'(?:[A-F\d][A-F\d])*')|(')|(")|(\[)|(NULL)|(CURRENT_TIME)|(CURRENT_DATE)|(CURRENT_TIMESTAMP)|(INSERT INTO)|(changes:\s*\d+\s*total_changes:\s*\d+\s*)|(VALUES)|(,)|(;)|(\()|(\))|(\w+)|(.+?)/gi;
 	data=data.toString();
 	
@@ -522,8 +525,13 @@ SQLite.prototype._handleStdout = function(data){
 SQLite.prototype._handleStderr = function(data){
 	if(this.debug>=2)
 		console.error("STDERR:"+data);
-	if(typeof(this._lastSqlCallback)=="function")
-		this._lastSqlCallback("Database error.");
+	if(typeof(this._lastSqlCallback)=="function") {
+		try {
+			this._lastSqlCallback("Database error.");
+		}catch(e){
+			this._lastSqlCallback("Database error. "+e);
+		}
+	}
 	
 	this._lastSqlCallback = null;
 	
